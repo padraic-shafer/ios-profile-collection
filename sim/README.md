@@ -142,18 +142,94 @@ Optional:
 
 ---
 
-## Adding a new device
+## Keeping the sim in sync
 
-1. Add its PVs to `sim/pv_inventory.py` (`build_inventory()`).
+The sim IOC is a parallel representation of the real profile devices.  It
+will drift whenever `startup/*.py` devices change.  A dedicated script
+detects and reports this drift automatically.
+
+### Drift detection (run this after any device change)
+
+```bash
+pixi run sim-check-drift
+```
+
+This runs `sim/check_drift.py`, which:
+
+1. **Loads the real profile devices offline** — executes the device-defining
+   `startup/*.py` files in an isolated namespace without connecting to EPICS
+   or any external service, then walks every ophyd Device/Signal object to
+   collect the authoritative PV set.
+2. **Loads the sim IOC PV set** — introspects `build_ioc_groups()` without
+   starting a server.
+3. **Compares and reports:**
+
+| Severity | Condition | Action needed |
+|---|---|---|
+| **FAIL** | Profile needs a PV the sim doesn't serve | Add a caproto PVGroup (see below) |
+| **FAIL** | A device file failed to load | Fix the stub namespace in `check_drift.py` |
+| WARN | Sim serves a PV no device requests | May be dead; consider removing |
+| WARN | `pv_inventory.py` diverges from the live walk | Run `--write` (see below) |
+
+Exit code: `0` if no FAILs, `1` if any FAIL (use `--strict` to also exit `1` on WARNs).
+
+### Typical workflow after changing a device
+
+```bash
+# 1. Edit startup/10-optics.py (or whichever file)
+# 2. Run the drift check — it tells you exactly what's missing
+pixi run sim-check-drift
+
+# 3. Add the missing PVs to sim/pvgroups/<file>.py and register in run_iocs.py
+# 4. Regenerate the hand-written inventory to match the new device walk
+pixi run sim-write-inventory          # runs check_drift.py --write
+git diff sim/pv_inventory.py          # review the generated changes
+
+# 5. Confirm clean
+pixi run sim-check-drift
+```
+
+### What `--write` does (and doesn't do)
+
+`pixi run sim-write-inventory` regenerates the `build_inventory()` function
+in `sim/pv_inventory.py` from the live device walk.  This keeps the
+hand-written inventory in step with reality so `get_pv_types()` stays
+accurate.
+
+It does **not** write caproto PVGroups — those require behavioral logic
+(putters, move simulation, enum strings) that a generator can't supply.
+The drift check tells you *which* device needs a new PVGroup and *which*
+PVs are missing; writing the PVGroup remains a human task.
+
+### Adding a new device
+
+When adding a new device to `startup/*.py`:
+
+1. Run `pixi run sim-check-drift` — it names the device and lists its missing PVs.
 2. Add a caproto `PVGroup` in the appropriate `sim/pvgroups/*.py` file.
 3. Register it in `sim/run_iocs.py` (`build_ioc_groups()`).
 4. Run `pixi run sim-list-pvs` to confirm the new PVs appear.
+5. Run `pixi run sim-write-inventory` to update `pv_inventory.py`.
+6. Run `pixi run sim-check-drift` again to confirm clean.
 
 If the device prefix contains `{...}` (EPICS ACF notation):
 - Caproto uses `str.format()` on prefix strings, so `{` → `{{` and `}` → `}}`.
 - If the prefix is "split" (e.g. `"XF:23ID-ID{EPU:1"` — the `{` is closed
   by the child suffix), use **absolute PV names** in `pvproperty(name=...)`
   and instantiate the group with `prefix=""`.  See `EPU1IOC` for an example.
+
+### CI drift checking
+
+The GitHub Actions workflow runs two jobs on every PR touching `sim/**` or
+`startup/**`:
+
+- **drift-check** (fast, no live IOC): runs `check_drift.py --json --strict`
+  and fails the build if any profile PV is missing from the sim.
+- **integration** (live IOC + acceptance tests): starts the caproto IOC and
+  runs `sim/run_tests.py` for end-to-end verification.
+
+A PR that adds a new device to `startup/*.py` **must** also add the
+corresponding sim PVGroup, or the drift-check CI job will block it.
 
 ---
 

@@ -1,13 +1,24 @@
 # .github/workflows/sim-tests.yml
 # ---------------------------------
-# CI: start the caproto sim IOC and run the acceptance test suite.
+# CI for the IOS sim IOC stack.  Two jobs run in parallel:
+#
+#   drift-check   (Source A vs B — fast, no live IOC, no services)
+#     Loads the real profile device definitions offline, walks their PV set,
+#     and compares against what the sim IOC serves.  Fails the build if any
+#     profile PV is missing from the sim.  This is the primary guard against
+#     sim drift when startup/*.py devices change.
+#
+#   integration   (Source C — heavier, requires live IOC + redis)
+#     Starts the caproto sim IOC, runs the full acceptance test suite
+#     (count([sclr], num=5) and a motor scan), and verifies all device
+#     families connect.  This is the end-to-end confirmation that A↔B
+#     coverage holds at runtime.
 #
 # Triggered on:
-#   - push / PR to main or ioc-mocks branches
-#   - changes to sim/** or startup/** files
+#   - push / PR to main or ioc-mocks branches touching sim/** or startup/**
 #   - manual dispatch
 
-name: Sim IOC acceptance tests
+name: Sim IOC tests
 
 on:
   push:
@@ -28,12 +39,72 @@ on:
   workflow_dispatch:
 
 jobs:
-  sim-tests:
-    name: Sim IOC acceptance tests
+
+  # ---------------------------------------------------------------------------
+  # Job 1: drift-check  (Source A vs B — fast, no live IOC)
+  # ---------------------------------------------------------------------------
+  drift-check:
+    name: "Drift check (Source A vs B)"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@v0.8.1
+        with:
+          pixi-version: "latest"
+          cache: true
+          environments: sim
+
+      - name: Install sim environment
+        run: pixi install --environment sim
+        env:
+          UV_LOCK_TIMEOUT: "1200"
+
+      - name: Run drift check
+        # --json for structured CI output; --strict promotes inventory WARNs
+        # to FAILs so a stale pv_inventory.py also breaks the build.
+        # Remove --strict if inventory drift alone should not block merges.
+        run: |
+          pixi run --environment sim python sim/check_drift.py --json --strict \
+            | tee drift-report.json
+          # Re-run in human-readable mode for the log (exit code from first run)
+          pixi run --environment sim python sim/check_drift.py || true
+        env:
+          UV_LOCK_TIMEOUT: "1200"
+
+      - name: Upload drift report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-report
+          path: drift-report.json
+
+      - name: Fail if drift detected
+        run: |
+          RESULT=$(python3 -c "import json; d=json.load(open('drift-report.json')); print(d['result'])")
+          echo "Drift check result: $RESULT"
+          if [ "$RESULT" != "ok" ]; then
+            echo ""
+            echo "The sim IOC is missing PVs that the profile requires."
+            echo "Run 'pixi run sim-check-drift' locally for the full report."
+            echo "Then update sim/pvgroups/ and/or run 'pixi run sim-write-inventory'."
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Job 2: integration  (Source C — live IOC + acceptance tests)
+  # ---------------------------------------------------------------------------
+  integration:
+    name: "Integration tests (Source C, live IOC)"
     runs-on: ubuntu-latest
 
     services:
-      # Redis — replaces xf23id2-ios-redis1 in sim mode
+      # Redis — replaces the production TLS redis in sim mode.
+      # pre_exec.py / stubs.py override configure_base to use this plaintext
+      # container (redis_ssl=False, host=localhost).
       redis:
         image: redis:7-alpine
         ports:
@@ -55,7 +126,6 @@ jobs:
           cache: true
           environments: sim
 
-      # Install the sim pixi environment (caproto + ophyd + bluesky, no Qt)
       - name: Install sim environment
         run: pixi install --environment sim
         env:
@@ -67,12 +137,11 @@ jobs:
           EPICS_CAS_BEACON_ADDR_LIST=127.0.0.1 \
           pixi run --environment sim python sim/run_iocs.py &
           echo "IOC_PID=$!" >> $GITHUB_ENV
-          # Wait for the IOC to bind
           sleep 5
         env:
           UV_LOCK_TIMEOUT: "1200"
 
-      - name: Verify IOC PV count
+      - name: Verify IOC PV count (>2000 expected)
         run: |
           COUNT=$(pixi run --environment sim python sim/run_iocs.py --list-pvs 2>/dev/null | wc -l)
           echo "Sim IOC serves $COUNT PVs"
@@ -80,7 +149,12 @@ jobs:
         env:
           UV_LOCK_TIMEOUT: "1200"
 
-      - name: Run acceptance tests
+      - name: Run acceptance test suite
+        # sim/run_tests.py exercises:
+        #   - CA connectivity for all device families
+        #   - ophyd device connect (EpicsMotor, EpicsSignal)
+        #   - count([sclr], num=5)  — existing acceptance_tests/01 scenario
+        #   - scan([sclr], appes_x, 0, 1, 3)  — motor scan smoke test
         run: |
           pixi run --environment sim python sim/run_tests.py
         env:
@@ -88,7 +162,7 @@ jobs:
           EPICS_CA_AUTO_ADDR_LIST: "NO"
           EPICS_CAS_AUTO_BEACON_ADDR_LIST: "no"
           EPICS_CAS_BEACON_ADDR_LIST: "127.0.0.1"
-          IOS_SIM_KAFKA: ""       # Kafka not started in CI — disable publishing
+          IOS_SIM_KAFKA: ""       # Kafka container not started in CI
           UV_LOCK_TIMEOUT: "1200"
 
       - name: Stop sim IOC

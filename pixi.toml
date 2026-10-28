@@ -88,6 +88,15 @@ sim-start = { cmd = "bash -c 'EPICS_CAS_AUTO_BEACON_ADDR_LIST=no EPICS_CAS_BEACO
 # Run the acceptance test suite against the sim IOC (non-interactive)
 sim-test = { cmd = "bash -c 'EPICS_CAS_AUTO_BEACON_ADDR_LIST=no EPICS_CAS_BEACON_ADDR_LIST=127.0.0.1 python sim/run_iocs.py &; IOC_PID=$!; sleep 4; trap \"kill $IOC_PID 2>/dev/null\" EXIT; EPICS_CA_ADDR_LIST=127.0.0.1 EPICS_CA_AUTO_ADDR_LIST=NO python sim/run_tests.py'" }
 
+# Drift check: compare real profile devices against the sim IOC (fast, no IOC needed).
+# Exit 0 = no FAILs; exit 1 = gaps found (add PVGroups or run --write).
+# Run this whenever startup/*.py devices change.
+sim-check-drift = "python sim/check_drift.py"
+
+# Drift check writing mode: regenerate sim/pv_inventory.py from the live walk.
+# Review with: git diff sim/pv_inventory.py
+sim-write-inventory = "python sim/check_drift.py --write"
+
 [environments.terminal]
 features = ["profile", "terminal"]
 solve-group = "profile"
