@@ -1,0 +1,95 @@
+# sim/externals/podman-compose.yml
+# ---------------------------------
+# Simulated external services for the IOS profile collection.
+#
+# Brings up three containers on localhost:
+#   redis           - replaces the production xf23id2-ios-redis1.nsls2.bnl.gov
+#   kafka           - replaces the production Kafka broker (bitnami/kafka, KRaft)
+#   zmq-proxy       - bluesky 0MQ proxy (Publisher -> localhost:5577)
+#
+# Usage:
+#   cd sim/externals
+#   podman-compose up -d
+#   # wait for healthchecks, then start the sim IOC and profile
+#   podman-compose down   # when done
+
+version: "3.8"
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Redis
+  # ---------------------------------------------------------------------------
+  # The production profile uses redis with TLS (redis_ssl=True).
+  # This sim container uses plain TCP on port 6379.
+  # WARNING: pre_exec.py overrides configure_base() to use host=localhost,
+  # port=6379, redis_ssl=False.  This deviation is intentional for the sim
+  # stack only — do NOT carry it into production.
+  redis:
+    image: docker.io/redis:7-alpine
+    container_name: ios-sim-redis
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6379:6379"
+    command: redis-server --save "" --appendonly no --loglevel warning
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  # ---------------------------------------------------------------------------
+  # Kafka (KRaft mode, single broker — no ZooKeeper)
+  # ---------------------------------------------------------------------------
+  kafka:
+    image: docker.io/bitnami/kafka:3.7
+    container_name: ios-sim-kafka
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9092:9092"
+    environment:
+      # KRaft settings
+      KAFKA_CFG_NODE_ID: "1"
+      KAFKA_CFG_PROCESS_ROLES: "broker,controller"
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "1@kafka:9093"
+      # Listeners — PLAINTEXT for clients, CONTROLLER for internal KRaft
+      KAFKA_CFG_LISTENERS: "PLAINTEXT://:9092,CONTROLLER://:9093"
+      KAFKA_CFG_ADVERTISED_LISTENERS: "PLAINTEXT://127.0.0.1:9092"
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT"
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "PLAINTEXT"
+      # Auto-create topics so the beamline topic is ready immediately
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_CFG_NUM_PARTITIONS: "1"
+      KAFKA_CFG_DEFAULT_REPLICATION_FACTOR: "1"
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      ALLOW_PLAINTEXT_LISTENER: "yes"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-broker-api-versions.sh --bootstrap-server localhost:9092 2>/dev/null | grep -q 'ApiVersions'"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 20s
+
+  # ---------------------------------------------------------------------------
+  # bluesky 0MQ proxy
+  # ---------------------------------------------------------------------------
+  # Listens on port 5577 (PUSH) and 5578 (SUB) — matching the production
+  # zmq Publisher address used in 00-startup.py:
+  #   pub = Publisher('localhost:5577')
+  zmq-proxy:
+    image: docker.io/nsls2/bluesky-zmq-proxy:latest
+    container_name: ios-sim-zmq-proxy
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5577:5577"
+      - "127.0.0.1:5578:5578"
+    # If the image isn't available, fall back to a pyzmq-based proxy.
+    # The profile's Publisher will still connect; failure here is non-fatal.
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import zmq; c=zmq.Context(); s=c.socket(zmq.PUSH); s.connect('tcp://localhost:5577'); s.close(); c.term()\" 2>/dev/null && echo ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s

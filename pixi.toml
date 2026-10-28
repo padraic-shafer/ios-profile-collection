@@ -54,7 +54,39 @@ numpy = ">2"
 
 [feature.terminal.tasks]
 start = "unset SESSION_MANAGER PYTHONPATH && MPLBACKEND=qtagg ipython --profile-dir=."
-pvs = "ipython --profile-dir=. -c 'get_pv_types(); exit()'"
+# pvs: walk every ophyd device and print the exact PV set the profile connects to.
+# get_pv_types() is defined in sim/pv_inventory.py and injected via startup.
+pvs = "ipython --profile-dir=. -c 'import sys; sys.path.insert(0,\".\"); from sim.pv_inventory import get_pv_types; get_pv_types(); exit()'"
+
+[feature.sim.dependencies]
+caproto = ">=1.1.1,!=1.2.0"
+numpy = "*"
+python = ">=3.12,<3.13"
+redis-py = ">=4.0"
+
+[feature.sim.tasks]
+# Start the containerised external services (redis, kafka, zmq-proxy)
+sim-up = "podman-compose -f sim/externals/podman-compose.yml up -d"
+
+# Stop the containerised external services
+sim-down = "podman-compose -f sim/externals/podman-compose.yml down"
+
+# Start the caproto sim IOC (blocks; run in a separate terminal or background)
+sim-iocs = { cmd = "python sim/run_iocs.py", env = { EPICS_CAS_AUTO_BEACON_ADDR_LIST = "no", EPICS_CAS_BEACON_ADDR_LIST = "127.0.0.1" } }
+
+# List every PV served by the sim IOC
+sim-list-pvs = "python sim/run_iocs.py --list-pvs"
+
+# Print the PV inventory derived from ophyd device definitions
+sim-pv-types = "python -c 'import sys; sys.path.insert(0,\".\"); from sim.pv_inventory import get_pv_types; get_pv_types()'"
+
+# Full sim stack: start IOC (background), then launch the profile with stubs applied.
+# The caproto IOC is started in the background; a brief sleep lets it bind before
+# the profile loads.  Stop with Ctrl-C; the IOC process is cleaned up on exit.
+sim-start = { cmd = "bash -c 'EPICS_CAS_AUTO_BEACON_ADDR_LIST=no EPICS_CAS_BEACON_ADDR_LIST=127.0.0.1 python sim/run_iocs.py &; IOC_PID=$!; sleep 3; trap \"kill $IOC_PID 2>/dev/null\" EXIT; MPLBACKEND=agg EPICS_CA_ADDR_LIST=127.0.0.1 EPICS_CA_AUTO_ADDR_LIST=NO ipython --profile-dir=. -c \"exec(open(\\\"sim/externals/pre_exec.py\\\").read())\" -i'" }
+
+# Run the acceptance test suite against the sim IOC (non-interactive)
+sim-test = { cmd = "bash -c 'EPICS_CAS_AUTO_BEACON_ADDR_LIST=no EPICS_CAS_BEACON_ADDR_LIST=127.0.0.1 python sim/run_iocs.py &; IOC_PID=$!; sleep 4; trap \"kill $IOC_PID 2>/dev/null\" EXIT; EPICS_CA_ADDR_LIST=127.0.0.1 EPICS_CA_AUTO_ADDR_LIST=NO python sim/run_tests.py'" }
 
 [environments.terminal]
 features = ["profile", "terminal"]
@@ -62,4 +94,8 @@ solve-group = "profile"
 
 [environments.qs]
 features = ["profile", "qs"]
+solve-group = "profile"
+
+[environments.sim]
+features = ["profile", "sim"]
 solve-group = "profile"

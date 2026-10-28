@@ -1,0 +1,26 @@
+# sim/externals/kafka.yml
+# ------------------------
+# Bluesky-kafka configuration for the sim stack.
+# Points at the local Kafka broker started by podman-compose.
+#
+# nslsii.configure_base() reads the Kafka config from the path set by the
+# BLUESKY_KAFKA_CONFIG_FILE environment variable (or a default system path).
+# pre_exec.py sets BLUESKY_KAFKA_CONFIG_FILE to point at this file.
+
+# Sim Kafka broker on localhost
+bootstrap_servers: "127.0.0.1:9092"
+
+# The beamline topic — matches what the production profile publishes to.
+# The sim Kafka auto-creates topics, so this will be created on first publish.
+topic: "ios.bluesky.documents"
+
+producer_config:
+  acks: "0"               # fire-and-forget for sim (production uses "1")
+  request.timeout.ms: 1000
+  message.timeout.ms: 2000
+
+consumer_config:
+  auto.offset.reset: "latest"
+
+# Security — plain TCP for sim (production uses SSL)
+security_protocol: "PLAINTEXT"

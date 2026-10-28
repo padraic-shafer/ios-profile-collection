@@ -1,0 +1,96 @@
+# .github/workflows/sim-tests.yml
+# ---------------------------------
+# CI: start the caproto sim IOC and run the acceptance test suite.
+#
+# Triggered on:
+#   - push / PR to main or ioc-mocks branches
+#   - changes to sim/** or startup/** files
+#   - manual dispatch
+
+name: Sim IOC acceptance tests
+
+on:
+  push:
+    branches: [main, ioc-mocks]
+    paths:
+      - "sim/**"
+      - "startup/**"
+      - "pixi.toml"
+      - "pixi.lock"
+      - ".github/workflows/sim-tests.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "sim/**"
+      - "startup/**"
+      - "pixi.toml"
+      - "pixi.lock"
+  workflow_dispatch:
+
+jobs:
+  sim-tests:
+    name: Sim IOC acceptance tests
+    runs-on: ubuntu-latest
+
+    services:
+      # Redis — replaces xf23id2-ios-redis1 in sim mode
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@v0.8.1
+        with:
+          pixi-version: "latest"
+          cache: true
+          environments: sim
+
+      # Install the sim pixi environment (caproto + ophyd + bluesky, no Qt)
+      - name: Install sim environment
+        run: pixi install --environment sim
+        env:
+          UV_LOCK_TIMEOUT: "1200"
+
+      - name: Start caproto sim IOC (background)
+        run: |
+          EPICS_CAS_AUTO_BEACON_ADDR_LIST=no \
+          EPICS_CAS_BEACON_ADDR_LIST=127.0.0.1 \
+          pixi run --environment sim python sim/run_iocs.py &
+          echo "IOC_PID=$!" >> $GITHUB_ENV
+          # Wait for the IOC to bind
+          sleep 5
+        env:
+          UV_LOCK_TIMEOUT: "1200"
+
+      - name: Verify IOC PV count
+        run: |
+          COUNT=$(pixi run --environment sim python sim/run_iocs.py --list-pvs 2>/dev/null | wc -l)
+          echo "Sim IOC serves $COUNT PVs"
+          test "$COUNT" -gt 2000
+        env:
+          UV_LOCK_TIMEOUT: "1200"
+
+      - name: Run acceptance tests
+        run: |
+          pixi run --environment sim python sim/run_tests.py
+        env:
+          EPICS_CA_ADDR_LIST: "127.0.0.1"
+          EPICS_CA_AUTO_ADDR_LIST: "NO"
+          EPICS_CAS_AUTO_BEACON_ADDR_LIST: "no"
+          EPICS_CAS_BEACON_ADDR_LIST: "127.0.0.1"
+          IOS_SIM_KAFKA: ""       # Kafka not started in CI — disable publishing
+          UV_LOCK_TIMEOUT: "1200"
+
+      - name: Stop sim IOC
+        if: always()
+        run: kill $IOC_PID 2>/dev/null || true

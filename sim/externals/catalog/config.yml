@@ -1,0 +1,17 @@
+# sim/externals/catalog/config.yml
+# ----------------------------------
+# Local databroker / tiled catalog configuration for the sim stack.
+#
+# The production profile passes broker_name='ios' to nslsii.configure_base(),
+# which resolves a databroker catalog named 'ios'.  In the sim stack,
+# pre_exec.py patches the catalog lookup so that 'ios' resolves to this
+# local msgpack-based catalog stored under /tmp/ios-sim-catalog/.
+#
+# This file is here for reference; the actual monkey-patch is in stubs.py.
+
+sources:
+  ios:
+    driver: "databroker.adapters.msgpack.BlueskyMsgpackCatalog"
+    args:
+      paths:
+        - "/tmp/ios-sim-catalog/*.msgpack"
