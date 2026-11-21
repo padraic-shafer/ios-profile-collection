@@ -220,6 +220,49 @@ def test_the_xspress3_is_ready_for_the_next_trigger_when_it_reports_done():
     assert acquire.value in (0, "Done") and readback.value in (0, "Done")
 
 
+def test_the_xspress3_put_completes_when_the_acquisition_ends_unless_switched_off():
+    import os
+    import time
+
+    from sim.pvgroups import xspress3
+
+    os.environ.pop("IOS_SIM_XS3_PUT_COMPLETION", None)  # on by default
+    try:
+        ioc = xspress3.build()(prefix="")
+        acquire = ioc.pvdb[xspress3.PREFIX + "det1:Acquire"]
+        readback = ioc.pvdb[xspress3.PREFIX + "det1:Acquire_RBV"]
+        seconds = ioc.pvdb[xspress3.PREFIX + "det1:AcquireTime"]
+
+        async def run():
+            await seconds.write(0.2)
+            start = time.monotonic()
+            result = await acquire.pvspec.put(ioc, acquire, 1)
+            return time.monotonic() - start, result, readback.value
+
+        elapsed, result, rbv = asyncio.run(run())
+    finally:
+        pass
+    assert 0.15 < elapsed < 1.0, elapsed  # the put returned when the acquisition had ended
+    assert result == 0 and rbv in (0, "Done")
+
+    os.environ["IOS_SIM_XS3_PUT_COMPLETION"] = "0"
+    try:
+        ioc = xspress3.build()(prefix="")
+        acquire = ioc.pvdb[xspress3.PREFIX + "det1:Acquire"]
+
+        async def quick():
+            await ioc.pvdb[xspress3.PREFIX + "det1:AcquireTime"].write(0.2)
+            start = time.monotonic()
+            await acquire.pvspec.put(ioc, acquire, 1)
+            elapsed = time.monotonic() - start
+            await asyncio.sleep(0.4)  # let the acquisition end before the loop closes
+            return elapsed
+
+        assert asyncio.run(quick()) < 0.1  # switched off: the put returns at once, as before
+    finally:
+        del os.environ["IOS_SIM_XS3_PUT_COMPLETION"]
+
+
 def test_the_scaler_starts_in_autocount_like_the_real_one():
     from sim.pvgroups.scaler_signals import ScalerIOC
 

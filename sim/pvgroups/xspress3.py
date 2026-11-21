@@ -25,7 +25,8 @@ Behaviour
   (``FilePathExists_RBV`` = 0) and nothing is written, so that a profile that still points at the
   beamline's data directory cannot create files there.
 
-Settings (environment): ``IOS_SIM_DATA_DIR`` (default ``/tmp/ios-sim-data``),
+Settings (environment): ``IOS_SIM_XS3_PUT_COMPLETION`` (default on, ``0`` switches it off: a put to ``Acquire``
+completes when the acquisition has ended, as on a real IOC, and not at once), ``IOS_SIM_DATA_DIR`` (default ``/tmp/ios-sim-data``),
 ``IOS_SIM_XS3_FRAMES`` (frames in the shared file, default 20000).
 """
 
@@ -342,11 +343,17 @@ def build() -> type:
         if getattr(self, "_acquiring", False):
             return value
         self._acquiring = True
+        done = asyncio.Event()  # one per acquisition: the next put may arrive while this one is still ending
         await getattr(self, attr("det1:Acquire_RBV")).write(1)
-        asyncio.get_event_loop().create_task(self._acquire())
+        asyncio.get_event_loop().create_task(self._acquire(done))
+        if os.environ.get("IOS_SIM_XS3_PUT_COMPLETION", "1") != "0":
+            # As on an areaDetector IOC: the put to Acquire completes when the acquisition has ended, so a client
+            # that waits for put completion does not depend on seeing the readback go to 1 and back to 0.
+            await done.wait()
+            return 0  # the value the setpoint has by then
         return value
 
-    async def _acquire(self):
+    async def _acquire(self, done: asyncio.Event | None = None):
         rng = np.random.default_rng()
         seconds = float(getattr(self, attr("det1:AcquireTime")).value)
         await asyncio.sleep(min(max(seconds, 0.0), MAX_ACQUIRE_S))
@@ -377,6 +384,8 @@ def build() -> type:
         await getattr(self, attr("det1:Acquire")).write(0)
         self._acquiring = False
         await getattr(self, attr("det1:Acquire_RBV")).write(0)
+        if done is not None:
+            done.set()
 
     attrs[attr_of[PREFIX + "det1:Acquire"]] = attrs[attr_of[PREFIX + "det1:Acquire"]].putter(acquire_put)
 

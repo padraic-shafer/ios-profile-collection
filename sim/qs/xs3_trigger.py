@@ -60,3 +60,36 @@ def install(detector, grace: float = GRACE_S) -> None:
         return status
 
     detector.trigger = trigger
+
+
+def install_put_completion(detector) -> None:
+    """Make nslsii's ``acquire.put(1, wait=False)`` use put completion, and finish the trigger from it.
+
+    An areaDetector IOC completes a put to ``Acquire`` when the acquisition has ended (the busy-record
+    convention), so the reply to the write says the point is done and cannot be lost the way a short
+    monitor value can. nslsii's trigger does not wait for it; this wrapper sends the same write with
+    ``use_complete=True`` and finishes the trigger's status from the callback. The readback edge may finish
+    it first (the usual order); then nothing happens.
+    """
+    acquire = detector.cam.acquire
+    original_put = acquire.put
+
+    def put(value, *args, **kwargs):
+        if value == 1 and kwargs.get("wait") is False and "callback" not in kwargs and not kwargs.get("use_complete"):
+            status = getattr(detector, "_acquire_status", None)
+
+            def done(**_kwargs):
+                if status is None or status.done:
+                    return
+                try:
+                    status.set_finished()
+                except Exception:  # the readback edge finished it at the same moment
+                    return
+                if getattr(detector, "_acquire_status", None) is status:
+                    detector._acquire_status = None
+                log.debug("xs3 trigger finished by put completion")
+
+            return original_put(value, *args, use_complete=True, callback=done, **kwargs)
+        return original_put(value, *args, **kwargs)
+
+    acquire.put = put

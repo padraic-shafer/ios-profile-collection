@@ -197,6 +197,39 @@ def test_a_trigger_does_not_finish_before_the_counter_moves():
     assert len(detector.cam.array_counter.subs) == 1
 
 
+def test_the_trigger_writes_with_put_completion_and_finishes_from_it():
+    from types import SimpleNamespace
+
+    from ophyd.status import Status
+
+    from sim.qs.xs3_trigger import install_put_completion
+
+    calls = []
+
+    class FakeAcquire:
+        def put(self, value, **kwargs):
+            calls.append((value, kwargs))
+
+    detector = SimpleNamespace(cam=SimpleNamespace(acquire=FakeAcquire()), _acquire_status=Status())
+    status = detector._acquire_status
+    install_put_completion(detector)
+    detector.cam.acquire.put(1, wait=False)  # what nslsii's trigger does
+    value, kwargs = calls[-1]
+    assert value == 1 and kwargs["use_complete"] is True and "wait" in kwargs
+    assert not status.done
+    kwargs["callback"]()  # the IOC's reply: the acquisition has ended, and the readback edge was not seen
+    assert status.done and status.success and detector._acquire_status is None
+    # another kind of write is passed on as it is
+    detector.cam.acquire.put(0)
+    assert calls[-1] == (0, {})
+    # and a status that the edge finished first is left alone
+    detector._acquire_status = Status()
+    first = detector._acquire_status
+    detector.cam.acquire.put(1, wait=False)
+    first.set_finished()
+    calls[-1][1]["callback"]()  # must not raise
+
+
 if __name__ == "__main__":
     failed = 0
     for name, func in sorted(globals().items()):

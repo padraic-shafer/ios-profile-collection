@@ -170,6 +170,13 @@ The type of each PV is guessed from its name and component.
   `MCA1:ArrayData` and `MCASUM1:ArrayData` with a simulated spectrum (a background and lines at bins 450 and
   820, scaled with the time), sets each ROI total to the sum over `[MinX, MinX + SizeX)`, counts the image and
   drops both back to 0.
+- **Put completion.** As on an areaDetector IOC, a put to `Acquire` completes when the acquisition has ended, not at
+  once (`IOS_SIM_XS3_PUT_COMPLETION=0` switches it off). A client that waits for put completion therefore does not
+  depend on seeing the readback go to 1 and back to 0, which a Channel Access monitor does not promise (a busy client
+  can miss a 1 that lasts 0.1 s). nslsii's `Xspress3Trigger` does not wait for it; the mock Queueserver's startup file
+  `sim/qs/zz-xs3-trigger.py` (`sim/qs/xs3_trigger.py`) makes its write use put completion and also lets a trigger finish
+  on the image counter after a 0.5 s grace (`IOS_SIM_XS3_TRIGGER`: `put+counter`, the default, `put`, `counter` or
+  `edge`, nslsii's own, for comparisons). Without it, scans stalled when the client missed the 1.
 - `HDF1:Capture` = 1 makes the file that the plugin names a **symbolic link to one shared simulated file**,
   `$IOS_SIM_DATA_DIR/.shared/xspress3-sim.h5` (written when the IOC starts: `IOS_SIM_XS3_FRAMES` frames,
   20000 by default, of the same spectrum; about 3 MB). Every image of every run is that spectrum.
