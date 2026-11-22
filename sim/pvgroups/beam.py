@@ -23,7 +23,10 @@ signals now and then show an event, so that the signals and their ratios move wh
   when ``IOS_SIM_EDGE_TABLE=1``, the lowest edge of a table of real edge energies (:data:`REAL_EDGES`) that lies
   inside the range. At the edge PD/I0 falls (transmission), TEY/I0 rises, ROI 4 (the resonant line, PFY) rises
   and ROI 3 (the non-resonant line) dips, so that IPFY = I0/ROI 3 rises: the same absorption, seen four ways.
-  Outside a scan the edge is not applied, so the Counter stays flat except for its events.
+  The edge belongs to the sample at an energy, so it follows the mono's energy and the range of the **last** fly
+  (set when the plan writes the fly start and stop, or when a fly starts), also for the points a plan takes just
+  before and after the fly. Before any fly the Counter is flat except for its events; after a scan it shows the
+  level at the energy where the mono stopped.
 
 Settings (environment): ``IOS_SIM_SEED`` (an integer; the default is the time at the start, which
 the IOC logs), ``IOS_SIM_PEAK_GAP_IDLE`` / ``IOS_SIM_PEAK_FWHM_IDLE`` (30 / 6 s),
@@ -263,8 +266,12 @@ def set_energy(energy: float) -> None:
 
 
 def edge_gains() -> EdgeGains:
-    """The factors of the edge at the mono's energy; all 1 unless the mono is flying."""
-    if not _scanning or _fly_range is None:
+    """The factors of the edge at the mono's energy, for the range of the last fly; all 1 before any range is set.
+
+    The absorption belongs to the sample at an energy, not to the fly: the points that a plan still takes after the
+    fly has ended (it learns of the end a moment later) and the one it takes before the ramp starts keep the edge.
+    """
+    if _fly_range is None:
         return EdgeGains()
     return get_beam().edge_gains(_energy, *_fly_range)
 

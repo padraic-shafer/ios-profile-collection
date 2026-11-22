@@ -142,7 +142,7 @@ def test_the_scaler_pd_i0_and_tey_follow_the_beam_and_their_ratios_stay_flat():
     from sim.pvgroups.scaler_signals import ScalerIOC
 
     beam._beam = model()
-    beam.set_scanning(False)
+    _forget_the_fly()
     ioc = ScalerIOC(prefix="X{{Sclr:1}}")
 
     async def counts():
@@ -231,15 +231,46 @@ def test_at_the_edge_pd_falls_tey_and_roi4_rise_and_roi3_dips_so_that_ipfy_rises
     assert 1.0 / above.roi3 > 2.0 / below.roi3 * 1.0  # IPFY (I0/ROI 3) rises
 
 
-def test_the_edge_applies_only_while_the_mono_flies():
-    beam._beam = beam.BeamModel(seed=1, schedules=NO_SCAN_EVENTS, edge=beam.EdgeSettings())
+def _forget_the_fly():
+    beam._fly_range = None
+    beam._energy = 0.0
     beam.set_scanning(False)
-    beam.set_fly_range(1015.0, 1065.0)
+
+
+def test_the_edge_follows_the_energy_and_the_last_fly_range_also_when_the_fly_is_over():
+    beam._beam = beam.BeamModel(seed=1, schedules=NO_SCAN_EVENTS, edge=beam.EdgeSettings())
+    _forget_the_fly()
     beam.set_energy(1065.0)
-    assert beam.edge_gains() == beam.EdgeGains()
+    assert beam.edge_gains() == beam.EdgeGains()  # no range yet: flat
+    beam.set_fly_range(1015.0, 1065.0)
+    assert beam.edge_gains().tey > 2.0  # above the edge, whether or not the mono is flying
     beam.set_scanning(True)
     assert beam.edge_gains().tey > 2.0
-    beam.set_scanning(False)
+    beam.set_scanning(False)  # the fly is over, and the plan takes a point or two more
+    assert beam.edge_gains().tey > 2.0
+    beam.set_energy(1016.0)  # the mono moves below the edge
+    assert beam.edge_gains().tey < 1.05
+    _forget_the_fly()
+
+
+def test_the_plan_writing_the_fly_range_sets_where_the_edge_is():
+    from sim.pvgroups.positioners import PGMEnergyIOC
+
+    beam._beam = beam.BeamModel(seed=1, schedules=NO_SCAN_EVENTS, edge=beam.EdgeSettings())
+    _forget_the_fly()
+    ioc = PGMEnergyIOC(prefix="")
+
+    async def run():
+        await ioc.fly_stop_sp.write(1065.0)
+        await ioc.fly_start_sp.pvspec.put(ioc, ioc.fly_start_sp, 1015.0)  # E_ramp writes the start first
+        first = beam._fly_range
+        await ioc.fly_start_sp.write(1015.0)
+        await ioc.fly_stop_sp.pvspec.put(ioc, ioc.fly_stop_sp, 1100.0)
+        return first, beam._fly_range
+
+    first, second = asyncio.run(run())
+    assert first == (1015.0, 1065.0) and second == (1015.0, 1100.0)
+    _forget_the_fly()
 
 
 def test_the_scaler_and_the_xspress3_follow_the_edge_during_a_fly():
@@ -247,6 +278,7 @@ def test_the_scaler_and_the_xspress3_follow_the_edge_during_a_fly():
     from sim.pvgroups.scaler_signals import ScalerIOC
 
     beam._beam = beam.BeamModel(seed=3, schedules=NO_SCAN_EVENTS, edge=beam.EdgeSettings())
+    _forget_the_fly()
     beam.set_fly_range(1015.0, 1065.0)
     ioc = ScalerIOC(prefix="X{{Sclr:1}}")
 
@@ -274,7 +306,7 @@ def test_the_scaler_and_the_xspress3_follow_the_edge_during_a_fly():
         roi3_before, roi4_before = rois(1015.0)
         roi3_after, roi4_after = rois(1065.0)
     finally:
-        beam.set_scanning(False)
+        _forget_the_fly()
     assert abs(pd_before - 0.75) < 0.05 and abs(tey_before - 0.6) < 0.05  # the flat backgrounds
     assert pd_after < 0.5 * pd_before and tey_after > 2.5 * tey_before
     assert roi4_after > 2.5 * roi4_before and roi3_after < 0.6 * roi3_before
@@ -379,7 +411,7 @@ def test_a_count_takes_the_preset_time_and_the_put_completes_when_it_is_done():
     from sim.pvgroups.scaler_signals import ScalerIOC
 
     beam._beam = model()
-    beam.set_scanning(False)
+    _forget_the_fly()
     ioc = ScalerIOC(prefix="X{{Sclr:1}}")
 
     async def run():
@@ -404,7 +436,7 @@ def test_only_the_auto_count_has_the_timed_events_a_count_that_a_plan_starts_doe
     from sim.pvgroups.scaler_signals import ScalerIOC
 
     beam._beam = model()
-    beam.set_scanning(False)
+    _forget_the_fly()
     ioc = ScalerIOC(prefix="X{{Sclr:1}}")
     saved = beam.tey_gain, beam.pd_gain
     beam.tey_gain, beam.pd_gain = (lambda: 5.0), (lambda: 0.2)  # an event at its height, as at the start of a ramp

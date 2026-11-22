@@ -273,6 +273,17 @@ class PGMEnergyIOC(PVGroup):
     move_sts      = pvproperty(name="XF:23ID2-OP{{Mono}}Sts:Move-Sts",         value="Done", dtype=str,
                                max_length=20, read_only=True)
 
+    @fly_start_sp.putter
+    async def fly_start_sp(self, instance, value):
+        # The plan writes the fly range before the ramp: that is where the simulated absorption edge is.
+        beam.set_fly_range(float(value), float(self.fly_stop_sp.value))
+        return value
+
+    @fly_stop_sp.putter
+    async def fly_stop_sp(self, instance, value):
+        beam.set_fly_range(float(self.fly_start_sp.value), float(value))
+        return value
+
     def _stop_fly(self) -> None:
         """End a fly that is running: the mono stops where it is."""
         if getattr(self, "_flying", False):

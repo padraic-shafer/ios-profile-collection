@@ -168,8 +168,11 @@ scan, `IOS_SIM_PEAK_GAP_SCAN`, is off by default):
 | Xspress3 ROI 4 (the resonant line, PFY) | rises | 1 + 3 a |
 | Xspress3 ROI 3 (the non-resonant line) | dips, so IPFY = I0/ROI 3 rises | 1/(1 + 1.5 a) |
 
-The edge applies only while the mono flies and ends with the fly, so the Counter afterwards is flat again,
-apart from its events.
+The absorption belongs to the sample at an energy, so the edge follows the mono's energy readback and the range of the
+**last** fly (set when the plan writes the fly start and stop, or when a fly starts): the point that a plan takes before
+the ramp starts, and the one or two it still takes after the mono has stopped (it learns of the end a moment later),
+keep the edge. Before any fly the Counter is flat apart from its events; after a scan it shows the level at the energy
+where the mono stopped, until the mono moves.
 
 A count that a client starts (a put to `.CNT`) takes the preset time (`.TP`): the record says `Count`, the channels are
 filled at the end, and the put completes then, as on a real scaler record. ophyd's trigger finishes on that put
