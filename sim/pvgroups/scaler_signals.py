@@ -31,11 +31,14 @@ from caproto import ChannelType
 
 from . import beam
 
-# Counts per second of the two signals that the beam model drives: the photodiode (scaler channel 2)
-# and I0, the gold mesh (channel 3). The other channels keep random counts.
+# Counts per second of the signals that the beam model drives: the photodiode (scaler channel 2), I0, the
+# gold mesh (channel 3) and TEY, the drain current of the sample (channel 4). The other channels keep
+# random counts.
 PD_RATE = 150_000.0
 I0_RATE = 200_000.0
+TEY_RATE = 120_000.0
 PD_EXTRA_NOISE = 0.005
+TEY_EXTRA_NOISE = 0.005
 
 
 # ---------------------------------------------------------------------------
@@ -60,9 +63,9 @@ class ScalerIOC(PVGroup):
     When ``.CNT`` is written with 1 the scaler counts for ``.TP`` seconds
     (simulated via asyncio.sleep) then fills channel values and resets ``.CNT`` to 0.
 
-    Channel 2 (PD) and channel 3 (I0) follow the beam model (sim/pvgroups/beam.py): Poisson counts of
-    a rate that changes slowly with time, and PD has now and then a peak. The other channels are
-    random integers.
+    Channel 2 (PD), channel 3 (I0) and channel 4 (TEY) follow the beam model (sim/pvgroups/beam.py):
+    Poisson counts of a rate that changes slowly with time. TEY has now and then a peak and PD a dip
+    at the same time. The other channels are random integers.
 
     Like the real record, it starts in AutoCount (``.CONT`` = 1): every ``.TP1`` seconds it counts
     by itself, unless a count that ``.CNT`` started is running or the mono is flying (a scan).
@@ -234,6 +237,7 @@ class ScalerIOC(PVGroup):
         ]
         intensity = beam.intensity()
         pd_noise = max(1.0 + PD_EXTRA_NOISE * rng.standard_normal(), 0.0)
+        tey_noise = max(1.0 + TEY_EXTRA_NOISE * rng.standard_normal(), 0.0)
         for i, ch in enumerate(channel_pvs):
             if i == 0:
                 await ch.write(int(seconds * self.FREQ.value))
@@ -241,6 +245,8 @@ class ScalerIOC(PVGroup):
                 await ch.write(int(rng.poisson(PD_RATE * seconds * intensity * beam.pd_gain() * pd_noise)))
             elif i == 2:
                 await ch.write(int(rng.poisson(I0_RATE * seconds * intensity)))
+            elif i == 3:
+                await ch.write(int(rng.poisson(TEY_RATE * seconds * intensity * beam.tey_gain() * tey_noise)))
             else:
                 await ch.write(int(rng.integers(1000, 100_000)))
         await self.T.write(seconds)

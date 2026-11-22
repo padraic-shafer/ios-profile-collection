@@ -1,4 +1,4 @@
-"""Offline checks of the simulated beam (sim/pvgroups/beam.py) and what is built on it: the scaler's PD and I0,
+"""Offline checks of the simulated beam (sim/pvgroups/beam.py) and what is built on it: the scaler's PD, I0 and TEY,
 the Xspress3's spectrum and its starting ROI windows. No IOC is started.
 
 The ``qs-sim`` environment has no pytest, so the file also runs as a script,
@@ -30,9 +30,9 @@ def model(seed=7, schedules=None):
     return beam.BeamModel(seed=seed, schedules=schedules or SCHEDULES)
 
 
-def gains(m, seconds, step, scanning):
+def gains(m, seconds, step, scanning, which="tey_gain"):
     times = np.arange(0.0, seconds, step)
-    return times, np.array([m.pd_gain(t, scanning) for t in times])
+    return times, np.array([getattr(m, which)(t, scanning) for t in times])
 
 
 def test_the_intensity_changes_slowly_and_by_a_few_percent():
@@ -46,11 +46,11 @@ def test_the_intensity_changes_slowly_and_by_a_few_percent():
 def test_the_same_seed_gives_the_same_beam_and_another_seed_another():
     a, b, c = model(1), model(1), model(2)
     assert [a.intensity(t) for t in (3.0, 50.0)] == [b.intensity(t) for t in (3.0, 50.0)]
-    assert [a.pd_gain(t) for t in range(0, 600, 3)] == [b.pd_gain(t) for t in range(0, 600, 3)]
-    assert [a.pd_gain(t) for t in range(0, 600, 3)] != [c.pd_gain(t) for t in range(0, 600, 3)]
+    assert [a.tey_gain(t) for t in range(0, 600, 3)] == [b.tey_gain(t) for t in range(0, 600, 3)]
+    assert [a.tey_gain(t) for t in range(0, 600, 3)] != [c.tey_gain(t) for t in range(0, 600, 3)]
 
 
-def test_the_pd_is_flat_except_in_peaks_that_reach_two_to_seven_times_the_background():
+def test_the_tey_is_flat_except_in_peaks_that_reach_two_to_seven_times_the_background():
     m = model()
     _, g = gains(m, 3600.0, 0.25, scanning=False)
     assert g.min() >= 1.0 and g.min() < 1.0 + 1e-6  # the flat background is exactly 1
@@ -63,7 +63,7 @@ def test_the_pd_is_flat_except_in_peaks_that_reach_two_to_seven_times_the_backgr
 def test_the_peaks_come_at_the_mean_gap_and_never_overlap():
     m = model()
     for mode, expected_gap, fwhm in ((beam.IDLE, 30.0, 6.0), (beam.SCAN, 360.0, 100.0)):
-        m.pd_gain(200_000.0, scanning=mode == beam.SCAN)  # draw about 6000 idle peaks
+        m.tey_gain(200_000.0, scanning=mode == beam.SCAN)  # draw about 6000 idle peaks
         peaks = m._peaks[mode]
         gaps = np.diff(peaks.centers)
         assert gaps.min() >= 2.0 * fwhm - 1e-9, mode
@@ -73,19 +73,37 @@ def test_the_peaks_come_at_the_mean_gap_and_never_overlap():
 def test_a_scan_peak_is_ten_ev_wide_at_the_preset_velocity():
     m = model()
     peaks = m._peaks[beam.SCAN]
-    m.pd_gain(2000.0, scanning=True)
+    m.tey_gain(2000.0, scanning=True)
     center, height = peaks.centers[0], peaks.heights[0]
     half = 1.0 + (height - 1.0) / 2.0
     velocity = 0.1  # eV/s, the preset's
-    assert abs(m.pd_gain(center - 50.0, True) - half) < 0.02 * height
-    assert abs(m.pd_gain(center + 50.0, True) - half) < 0.02 * height
+    assert abs(m.tey_gain(center - 50.0, True) - half) < 0.02 * height
+    assert abs(m.tey_gain(center + 50.0, True) - half) < 0.02 * height
     assert abs(2 * 50.0 * velocity - 10.0) < 1e-9
+
+
+def test_the_pd_dips_by_ten_to_eighty_percent_when_the_tey_peaks_and_the_two_are_tied():
+    m = model()
+    _, pd = gains(m, 3600.0, 0.25, scanning=False, which="pd_gain")
+    _, tey = gains(m, 3600.0, 0.25, scanning=False)
+    assert pd.max() <= 1.0 and pd.max() > 1.0 - 1e-6  # the flat background is exactly 1
+    assert 0.20 - 1e-6 <= pd.min() < 0.90  # at most 80 % below
+    peaks = m._peaks[beam.IDLE]
+    low, high = beam.PEAK_HEIGHTS
+    for center, height in list(zip(peaks.centers, peaks.heights))[:50]:
+        depth = beam.DIP_DEPTHS[0] + (beam.DIP_DEPTHS[1] - beam.DIP_DEPTHS[0]) * (height - low) / (high - low)
+        assert abs(m.pd_gain(center, False) - (1.0 - depth)) < 1e-3
+        assert abs(m.tey_gain(center, False) - height) < 1e-3
+    # they move together: whenever TEY is above its background, PD is below its own, and the reverse
+    assert (pd[tey > 1.0 + 1e-6] < 1.0 - 1e-9).all()
+    assert (tey[pd < 1.0 - 1e-6] > 1.0 + 1e-6).all()
 
 
 def test_a_schedule_with_no_gap_has_no_peaks():
     m = model(schedules={beam.IDLE: beam.PeakSchedule(0.0, 6.0), beam.SCAN: beam.PeakSchedule(360.0, 100.0)})
-    _, g = gains(m, 600.0, 1.0, scanning=False)
-    assert (g == 1.0).all()
+    for which in ("tey_gain", "pd_gain"):
+        _, g = gains(m, 600.0, 1.0, scanning=False, which=which)
+        assert (g == 1.0).all()
 
 
 def test_the_scanning_flag_picks_the_schedule():
@@ -120,7 +138,7 @@ def test_the_spectrum_scales_with_the_beam_intensity():
     assert 2.5 < high / low < 3.5
 
 
-def test_the_scaler_pd_and_i0_follow_the_beam_and_their_ratio_stays_flat():
+def test_the_scaler_pd_i0_and_tey_follow_the_beam_and_their_ratios_stay_flat():
     from sim.pvgroups.scaler_signals import ScalerIOC
 
     beam._beam = model()
@@ -131,15 +149,18 @@ def test_the_scaler_pd_and_i0_follow_the_beam_and_their_ratio_stays_flat():
         rows = []
         for _ in range(60):
             await ioc._fill(0.5)
-            rows.append((ioc.S2.value, ioc.S3.value, ioc.S1.value))
+            rows.append((ioc.S2.value, ioc.S3.value, ioc.S1.value, ioc.S4.value))
         return np.array(rows, dtype=float)
 
     rows = asyncio.run(counts())
-    pd, i0, clock = rows.T
+    pd, i0, clock, tey = rows.T
     assert (clock == 0.5 * ioc.FREQ.value).all()
     assert (i0 > 50_000).all() and (pd > 30_000).all()
-    ratio = pd / i0
-    assert ratio.std() / ratio.mean() < 0.05  # flat, apart from the noise and the peaks of PD
+    for name, signal in (("PD", pd), ("TEY", tey)):
+        ratio = signal / i0
+        assert ratio.std() / ratio.mean() < 0.05, name  # flat, apart from the noise and the events
+    assert (tey > 30_000).all()
+    assert abs(np.median(pd / i0) - 0.75) < 0.05 and abs(np.median(tey / i0) - 0.6) < 0.05
 
 
 def _flying_mono():

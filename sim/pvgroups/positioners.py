@@ -322,7 +322,7 @@ class PGMEnergyIOC(PVGroup):
         velocity = max(abs(float(self.fly_velo.value)), 1e-6)
         seconds = abs(stop - start) / velocity / max(float(os.environ.get("IOS_SIM_FLY_SPEEDUP", "1")), 1e-6)
         steps = max(int(seconds / 0.1), 1)
-        beam.set_scanning(True)  # the PD peaks of a scan (sim/pvgroups/beam.py)
+        beam.set_scanning(True)  # the scan schedule of the events (sim/pvgroups/beam.py)
         self._stop_requested = False
         try:
             for step in range(1, steps + 1):

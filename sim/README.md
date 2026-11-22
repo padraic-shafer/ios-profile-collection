@@ -91,7 +91,7 @@ sim/
 ├── run_tests.py             # acceptance test suite
 ├── pvgroups/
 │   ├── motors.py            # EpicsMotor records (47 motors)
-│   ├── beam.py              # the simulated beam: intensity over time, PD peaks
+│   ├── beam.py              # the simulated beam: intensity over time, TEY peaks and PD dips
 │   ├── scaler_signals.py    # Scaler, standalone signals, valves, shutters
 │   ├── positioners.py       # EPU, mirrors, PGM, Vortex MCA
 │   └── detectors.py        # SPECS area detector, Xspress3
@@ -138,12 +138,15 @@ Optional:
 
 `sim/pvgroups/beam.py` gives the scaler and the Xspress3 a beam that changes with time, so that live plots
 move. The relative intensity is 1 plus a 2 % oscillation (period about 97 s), a 0.6 % one (13 s) and a 1 %
-drift (10 min). Scaler channel 3 (I0, the gold mesh) and channel 2 (PD, the photodiode) are Poisson counts of
-a rate times that intensity, times the count time, so PD/I0 is flat (0.75) apart from noise; the Xspress3
-spectrum follows the same intensity. The other scaler channels are random, as before.
+drift (10 min). Scaler channel 3 (I0, the gold mesh), channel 2 (PD, the photodiode) and channel 4 (TEY, the
+drain current of the sample) are Poisson counts of a rate times that intensity, times the count time, so PD/I0
+(0.75) and TEY/I0 (0.6) are flat apart from noise; the Xspress3 spectrum follows the same intensity. The other
+scaler channels are random, as before.
 
-PD has now and then a peak, a Gaussian in time whose top is 2 to 7 times the background, so that PD/I0 runs
-from the flat level to 2 to 7 times it. Peaks never overlap and come at random with a mean gap:
+TEY has now and then a peak, a Gaussian in time whose top is 2 to 7 times the background, so that TEY/I0 runs
+from the flat level to 2 to 7 times it. At the same moment PD dips, 10 to 80 % below its background (the
+deeper the dip, the higher the peak): a stronger absorption raises the drain current and lowers the
+transmission. Events never overlap and come at random with a mean gap:
 
 | Situation | Mean gap | Width (FWHM) | Why |
 | --- | --- | --- | --- |
@@ -155,7 +158,7 @@ itself, except while a count that `.CNT` started is running or the mono is flyin
 
 Settings (environment): `IOS_SIM_SEED` (an integer; the default is the time at the start, logged by the IOC),
 `IOS_SIM_PEAK_GAP_IDLE` and `IOS_SIM_PEAK_FWHM_IDLE` (30, 6 s), `IOS_SIM_PEAK_GAP_SCAN` and
-`IOS_SIM_PEAK_FWHM_SCAN` (360, 100 s); a gap of 0 or less switches that schedule's peaks off. The tests are
+`IOS_SIM_PEAK_FWHM_SCAN` (360, 100 s); a gap of 0 or less switches that schedule's events off. The tests are
 `acceptance_tests/test_sim_beam.py` (`pixi run -e qs-sim python acceptance_tests/test_sim_beam.py`).
 
 ## The simulated Xspress3
