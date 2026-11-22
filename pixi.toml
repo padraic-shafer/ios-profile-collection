@@ -3,7 +3,7 @@ channels = ["conda-forge"]
 name = "ios-profile-collection"
 platforms = [{ platform = "linux-64", glibc = "2.17" }]
 version = "2026.3.0"
-requires-pixi = ">=0.82.1"
+requires-pixi = ">=0.83.0"
 
 [feature.profile.dependencies]
 bluesky-base = "==1.15.0"
