@@ -266,6 +266,29 @@ def test_a_trigger_that_ended_before_it_returns_still_returns_its_status():
     assert detector.trigger() is not None
 
 
+def test_the_readback_edge_of_nslsiis_trigger_is_switched_off_when_put_completion_is_used():
+    from types import SimpleNamespace
+
+    from sim.qs.xs3_trigger import _ignore_the_edge, install_put_completion
+
+    def make():
+        detector = SimpleNamespace(cam=SimpleNamespace(acquire=SimpleNamespace(put=lambda *a, **k: None)))
+        detector._acquire_changed = lambda value=None, old_value=None, **kw: calls.append((old_value, value))
+        return detector
+
+    calls = []
+    detector = make()
+    install_put_completion(detector)
+    assert detector._acquire_changed is _ignore_the_edge
+    detector._acquire_changed(value=0, old_value=1)
+    assert calls == []  # the edge no longer finishes anything
+
+    kept = make()
+    original = kept._acquire_changed
+    install_put_completion(kept, keep_edge=True)
+    assert kept._acquire_changed is original
+
+
 if __name__ == "__main__":
     failed = 0
     for name, func in sorted(globals().items()):

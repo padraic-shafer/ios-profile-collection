@@ -90,16 +90,27 @@ def install(detector, grace: float = GRACE_S) -> None:
     detector.trigger = trigger
 
 
-def install_put_completion(detector) -> None:
+def _ignore_the_edge(value=None, old_value=None, **kwargs) -> None:
+    """Stands in for nslsii's ``_acquire_changed``, which finishes a trigger on the 1 to 0 of the readback."""
+
+
+def install_put_completion(detector, keep_edge: bool = False) -> None:
     """Make nslsii's ``acquire.put(1, wait=False)`` use put completion, and finish the trigger from it.
 
     An areaDetector IOC completes a put to ``Acquire`` when the acquisition has ended (the busy-record
     convention), so the reply to the write says the point is done and cannot be lost the way a short
     monitor value can. nslsii's trigger does not wait for it; this wrapper sends the same write with
-    ``use_complete=True`` and finishes the trigger's status from the callback. The readback edge may finish
-    it first (the usual order); then nothing happens.
+    ``use_complete=True`` and finishes the trigger's status from the callback.
+
+    nslsii's own edge callback is switched off (``keep_edge=True`` keeps it): with two things that finish the same
+    status in no fixed order (they run on different ophyd threads), the second raised InvalidState (167 times in 3
+    hours on sb1) and a late edge could finish the next trigger early, so that a point read the previous frame.
+    The put completion finishes each trigger, with the image counter as a backstop if that is installed.
     """
     _keep_the_status(detector)
+    if not keep_edge and hasattr(detector, "_acquire_changed"):
+        # stage() subscribes self._acquire_changed, and unstage() clears the same attribute
+        detector._acquire_changed = _ignore_the_edge
     acquire = detector.cam.acquire
     original_put = acquire.put
 
