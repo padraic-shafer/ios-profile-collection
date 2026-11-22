@@ -68,7 +68,7 @@ def test_the_guard_refuses_when_the_simulated_ioc_does_not_answer():
 def test_the_startup_directory_has_the_guard_first_and_the_sim_files_last():
     with tempfile.TemporaryDirectory() as tmp:
         names = make_startup_dir.make_startup_dir(pathlib.Path(tmp))
-        assert names[0] == "00-00-sim-guard.py" and names[-2:] == ["zz-sim-paths.py", "zz-xs3-trigger.py"]
+        assert names[0] == "00-00-sim-guard.py" and names[-3:] == ["zz-sim-paths.py", "zz-tiled-writer.py", "zz-xs3-trigger.py"]
         assert "47-IOS_gui.py" not in names and "00-startup.py" in names and "99-xas-edge-plans.py" in names
         assert (pathlib.Path(tmp) / "00-startup.py").is_symlink()
         assert (pathlib.Path(tmp) / "user_group_permissions.yaml").is_file()

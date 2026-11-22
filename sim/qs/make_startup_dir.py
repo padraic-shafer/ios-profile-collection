@@ -6,6 +6,7 @@ order and reads ``user_group_permissions.yaml`` and ``existing_plans_and_devices
 
 * ``00-00-sim-guard.py``: the guard (sim/qs/guard.py), which sorts before ``00-startup.py``, and
   ``zz-sim-paths.py``, which points the Xspress3 files at the simulation's directory, and
+  ``zz-tiled-writer.py``, which writes the documents into a local Tiled if IOS_SIM_TILED_URI is set, and
   ``zz-xs3-trigger.py``, which sorts last and lets an Xspress3 trigger finish on the image counter too;
 * symbolic links to the numbered profile files of ``startup/`` (the profile is not changed or
   copied), except the ones in EXCLUDE, and the Qt and logging helpers that are not numbered;
@@ -42,6 +43,8 @@ def make_startup_dir(target: pathlib.Path, repo: pathlib.Path = REPO) -> list[st
     wanted["zz-sim-paths.py"] = repo / "sim" / "qs" / "zz-sim-paths.py"
     # after it: a second way for an Xspress3 trigger to finish (sim/qs/xs3_trigger.py)
     wanted["zz-xs3-trigger.py"] = repo / "sim" / "qs" / "zz-xs3-trigger.py"
+    # the documents into a Tiled on this machine, when IOS_SIM_TILED_URI says so (otherwise it does nothing)
+    wanted["zz-tiled-writer.py"] = repo / "sim" / "qs" / "zz-tiled-writer.py"
     for existing in target.iterdir():
         if existing.suffix == ".py" and existing.name not in wanted:
             existing.unlink()
