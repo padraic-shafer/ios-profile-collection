@@ -169,7 +169,7 @@ def _flying_mono():
     return PGMEnergyIOC(prefix="")
 
 
-def test_a_new_energy_setpoint_ends_a_fly_where_it_is_and_the_scan_schedule_with_it():
+def test_a_new_energy_setpoint_ends_a_fly_where_it_is_and_the_scanning_state_with_it():
     ioc = _flying_mono()
 
     async def run():
@@ -190,6 +190,95 @@ def test_a_new_energy_setpoint_ends_a_fly_where_it_is_and_the_scan_schedule_with
     assert not beam.is_scanning()
     assert ioc._flying is False and ioc.scan_sts.value in (0, "Ready")
     assert 400.0 < where < 410.0 and abs(ioc.enrgy_i.value - where) < 1e-6  # it stopped where it was
+
+
+NO_SCAN_EVENTS = {beam.IDLE: SCHEDULES[beam.IDLE], beam.SCAN: beam.PeakSchedule(0.0, 100.0)}
+
+
+def test_the_scan_events_are_off_by_default_and_the_idle_ones_are_not():
+    schedules = beam.schedules_from_environment()
+    assert not schedules[beam.SCAN].enabled
+    assert schedules[beam.IDLE].enabled
+
+
+def test_the_edge_is_where_the_fraction_says_and_the_absorption_steps_up_there():
+    m = beam.BeamModel(seed=1, schedules=NO_SCAN_EVENTS, edge=beam.EdgeSettings())
+    low, high = 1015.0, 1065.0
+    edge = m.edge_energy(low, high)
+    assert abs(edge - 1035.0) < 1e-9  # 40 % from the low end
+    assert m.edge_energy(high, low) == edge  # either order
+    assert m.absorption(low, low, high) < 0.01
+    assert m.absorption(edge, low, high) > 0.45  # half the step, and the white line starts
+    assert 1.0 <= m.absorption(high, low, high) < 1.1  # the step is 1, the white line has died away
+    custom = beam.BeamModel(seed=1, schedules=NO_SCAN_EVENTS, edge=beam.EdgeSettings(fraction=0.75))
+    assert abs(custom.edge_energy(low, high) - 1052.5) < 1e-9
+
+
+def test_the_edge_can_use_a_real_edge_energy_when_one_lies_in_the_range():
+    m = beam.BeamModel(seed=1, schedules=NO_SCAN_EVENTS, edge=beam.EdgeSettings(use_table=True))
+    assert m.edge_energy(1015.0, 1065.0) == beam.REAL_EDGES["Zn L3"]  # 1021.8 is inside, not at the very start
+    assert m.edge_energy(1000.0, 1010.0) == 1004.0  # no edge in the range: the fraction
+
+
+def test_at_the_edge_pd_falls_tey_and_roi4_rise_and_roi3_dips_so_that_ipfy_rises():
+    m = beam.BeamModel(seed=1, schedules=NO_SCAN_EVENTS, edge=beam.EdgeSettings())
+    below, above = m.edge_gains(1015.0, 1015.0, 1065.0), m.edge_gains(1065.0, 1015.0, 1065.0)
+    assert below.pd > 0.99 and below.tey < 1.01 and below.roi3 > 0.99 and below.roi4 < 1.01
+    assert above.pd < 0.5 * below.pd
+    assert above.tey > 2.5 * below.tey
+    assert above.roi4 > 3.0 * below.roi4
+    assert above.roi3 < 0.5 * below.roi3
+    assert 1.0 / above.roi3 > 2.0 / below.roi3 * 1.0  # IPFY (I0/ROI 3) rises
+
+
+def test_the_edge_applies_only_while_the_mono_flies():
+    beam._beam = beam.BeamModel(seed=1, schedules=NO_SCAN_EVENTS, edge=beam.EdgeSettings())
+    beam.set_scanning(False)
+    beam.set_fly_range(1015.0, 1065.0)
+    beam.set_energy(1065.0)
+    assert beam.edge_gains() == beam.EdgeGains()
+    beam.set_scanning(True)
+    assert beam.edge_gains().tey > 2.0
+    beam.set_scanning(False)
+
+
+def test_the_scaler_and_the_xspress3_follow_the_edge_during_a_fly():
+    from sim.pvgroups import xspress3
+    from sim.pvgroups.scaler_signals import ScalerIOC
+
+    beam._beam = beam.BeamModel(seed=3, schedules=NO_SCAN_EVENTS, edge=beam.EdgeSettings())
+    beam.set_fly_range(1015.0, 1065.0)
+    ioc = ScalerIOC(prefix="X{{Sclr:1}}")
+
+    async def ratios():
+        rows = []
+        for _ in range(40):
+            await ioc._fill(0.5)
+            rows.append((ioc.S2.value / ioc.S3.value, ioc.S4.value / ioc.S3.value))
+        return np.median(np.array(rows, dtype=float), axis=0)
+
+    beam.set_scanning(True)
+    try:
+        beam.set_energy(1015.0)
+        pd_before, tey_before = asyncio.run(ratios())
+        beam.set_energy(1065.0)
+        pd_after, tey_after = asyncio.run(ratios())
+        rng = np.random.default_rng(5)
+
+        def rois(energy):
+            beam.set_energy(energy)
+            gains = beam.edge_gains()
+            counts = xspress3.spectrum(20.0, rng, 1.0, gains.roi3, gains.roi4)
+            return counts[414:486].sum(), counts[775:865].sum()
+
+        roi3_before, roi4_before = rois(1015.0)
+        roi3_after, roi4_after = rois(1065.0)
+    finally:
+        beam.set_scanning(False)
+    assert abs(pd_before - 0.75) < 0.05 and abs(tey_before - 0.6) < 0.05  # the flat backgrounds
+    assert pd_after < 0.5 * pd_before and tey_after > 2.5 * tey_before
+    assert roi4_after > 2.5 * roi4_before and roi3_after < 0.6 * roi3_before
+
 
 
 def test_the_stop_commands_end_a_fly_and_do_nothing_when_there_is_none():

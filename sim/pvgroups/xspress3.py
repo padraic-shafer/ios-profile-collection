@@ -229,17 +229,25 @@ def _enum_key(short: str) -> str:
     return last.lower()
 
 
-def spectrum(seconds: float, rng: np.random.Generator, intensity: float = 1.0) -> np.ndarray:
+def spectrum(
+    seconds: float,
+    rng: np.random.Generator,
+    intensity: float = 1.0,
+    roi3_gain: float = 1.0,
+    roi4_gain: float = 1.0,
+) -> np.ndarray:
     """A simulated fluorescence spectrum: a falling background and two lines.
 
-    ``intensity`` scales the rate (the relative beam intensity, sim/pvgroups/beam.py).
+    ``intensity`` scales the rate (the relative beam intensity, sim/pvgroups/beam.py); ``roi3_gain`` and
+    ``roi4_gain`` scale the line in ROI 3 (bin 450, non-resonant) and in ROI 4 (bin 820, resonant), which the
+    absorption edge changes.
     """
     bins = np.arange(N_BINS)
     rate = (
         5.0
         + 200.0 * np.exp(-bins / 1500.0)
-        + 3000.0 * np.exp(-0.5 * ((bins - 450) / 12.0) ** 2)
-        + 2000.0 * np.exp(-0.5 * ((bins - 820) / 15.0) ** 2)
+        + 3000.0 * roi3_gain * np.exp(-0.5 * ((bins - 450) / 12.0) ** 2)
+        + 2000.0 * roi4_gain * np.exp(-0.5 * ((bins - 820) / 15.0) ** 2)
     )
     return rng.poisson(rate * max(seconds, 0.01) * max(intensity, 0.0)).astype(np.int32)
 
@@ -357,7 +365,8 @@ def build() -> type:
         rng = np.random.default_rng()
         seconds = float(getattr(self, attr("det1:AcquireTime")).value)
         await asyncio.sleep(min(max(seconds, 0.0), MAX_ACQUIRE_S))
-        counts = spectrum(seconds, rng, beam.intensity())
+        edge = beam.edge_gains()
+        counts = spectrum(seconds, rng, beam.intensity(), edge.roi3, edge.roi4)
         for array in ("MCA1:ArrayData", "MCASUM1:ArrayData"):
             if PREFIX + array in names:
                 await getattr(self, attr(array)).write(counts)

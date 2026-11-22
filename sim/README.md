@@ -146,19 +146,36 @@ scaler channels are random, as before.
 TEY has now and then a peak, a Gaussian in time whose top is 2 to 7 times the background, so that TEY/I0 runs
 from the flat level to 2 to 7 times it. At the same moment PD dips, 10 to 80 % below its background (the
 deeper the dip, the higher the peak): a stronger absorption raises the drain current and lowers the
-transmission. Events never overlap and come at random with a mean gap:
+transmission. Events never overlap and come at random with a mean gap of 30 s and a width (FWHM) of 6 s, so
+that they are visible within a minute of watching. They run while the mono is **not** flying (the Counter, or
+nothing running). While the mono flies, a scan has an **absorption edge** instead (the event schedule for a
+scan, `IOS_SIM_PEAK_GAP_SCAN`, is off by default):
 
-| Situation | Mean gap | Width (FWHM) | Why |
-| --- | --- | --- | --- |
-| Idle, or the Counter: the mono is not flying | 30 s | 6 s | visible within a minute of watching |
-| A scan: the mono is flying | 6 min | 100 s | 10 eV at the preset velocity of 0.1 eV/s |
+- **Where:** a fraction of the fly range from its low end (40 % by default; `IOS_SIM_EDGE_FRACTION`), or with
+  `IOS_SIM_EDGE_TABLE=1` the lowest real edge energy of a small table (`REAL_EDGES` in `beam.py`: C, N, O K edges,
+  3d metal L3 edges, Mg and Al K edges) that lies inside the range, at least 10 % from its ends. With no edge in the
+  range it falls back to the fraction.
+- **Shape:** a step (an error function, width 3 % of the range, at least 0.2 eV; `IOS_SIM_EDGE_WIDTH` sets it in
+  eV) with a small white line just above it. The mono's energy readback is the energy; the same absorption is
+  seen four ways:
+
+| Signal | At the edge | Factor at full absorption (a = 1) |
+| --- | --- | --- |
+| PD (transmission), so PD/I0 | falls | exp(-0.9 a) |
+| TEY, so TEY/I0 | rises | 1 + 2 a |
+| Xspress3 ROI 4 (the resonant line, PFY) | rises | 1 + 3 a |
+| Xspress3 ROI 3 (the non-resonant line) | dips, so IPFY = I0/ROI 3 rises | 1/(1 + 1.5 a) |
+
+The edge applies only while the mono flies and ends with the fly, so the Counter afterwards is flat again,
+apart from its events.
 
 The scaler starts in AutoCount (`.CONT` = 1), like the real one: every `.TP1` seconds (1 s) it counts by
 itself, except while a count that `.CNT` started is running or the mono is flying.
 
 Settings (environment): `IOS_SIM_SEED` (an integer; the default is the time at the start, logged by the IOC),
 `IOS_SIM_PEAK_GAP_IDLE` and `IOS_SIM_PEAK_FWHM_IDLE` (30, 6 s), `IOS_SIM_PEAK_GAP_SCAN` and
-`IOS_SIM_PEAK_FWHM_SCAN` (360, 100 s); a gap of 0 or less switches that schedule's events off. The tests are
+`IOS_SIM_PEAK_FWHM_SCAN` (0, 100 s); a gap of 0 or less switches that schedule's events off;
+`IOS_SIM_EDGE_FRACTION` (0.4), `IOS_SIM_EDGE_WIDTH` (0, which means 3 % of the range) and `IOS_SIM_EDGE_TABLE` (0). The tests are
 `acceptance_tests/test_sim_beam.py` (`pixi run -e qs-sim python acceptance_tests/test_sim_beam.py`).
 
 ## The simulated Xspress3
@@ -189,7 +206,7 @@ The type of each PV is guessed from its name and component.
   `/nsls2/data/ios/legacy/xspress3_data` cannot create files there.
 
 The mono fly (`Cmd:FlyStart-Cmd.PROC`) moves the energy readback from the start to the stop energy at the fly
-velocity and reports `Scanning` and then `Ready` (`IOS_SIM_FLY_SPEEDUP` shortens it), so `E_ramp` runs. A new energy setpoint (`Enrgy-SP`, which `E_ramp`'s clean-up writes after a scan, also after a stop) or the stop command ends the fly at once, where it is, as on the mono; the scan schedule of the beam model ends with it.
+velocity and reports `Scanning` and then `Ready` (`IOS_SIM_FLY_SPEEDUP` shortens it), so `E_ramp` runs. A new energy setpoint (`Enrgy-SP`, which `E_ramp`'s clean-up writes after a scan, also after a stop) or the stop command ends the fly at once, where it is, as on the mono; the scanning state of the beam model, and with it the edge, ends with it.
 
 ## PVs that are not simulated: the fallback
 

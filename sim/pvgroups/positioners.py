@@ -283,6 +283,7 @@ class PGMEnergyIOC(PVGroup):
         # A new setpoint ends a fly, as it does on the mono (E_ramp's clean-up writes it after a scan,
         # also after a stop); the readback then goes to the setpoint.
         self._stop_fly()
+        beam.set_energy(value)
         await self.enrgy_i.write(value)
         return value
 
@@ -322,13 +323,16 @@ class PGMEnergyIOC(PVGroup):
         velocity = max(abs(float(self.fly_velo.value)), 1e-6)
         seconds = abs(stop - start) / velocity / max(float(os.environ.get("IOS_SIM_FLY_SPEEDUP", "1")), 1e-6)
         steps = max(int(seconds / 0.1), 1)
-        beam.set_scanning(True)  # the scan schedule of the events (sim/pvgroups/beam.py)
+        beam.set_fly_range(start, stop)  # where the edge is (sim/pvgroups/beam.py)
+        beam.set_energy(start)
+        beam.set_scanning(True)  # the edge applies, the idle events do not
         self._stop_requested = False
         try:
             for step in range(1, steps + 1):
                 await asyncio.sleep(seconds / steps)
                 if self._stop_requested:
                     break
+                beam.set_energy(start + (stop - start) * step / steps)
                 await self.enrgy_i.write(start + (stop - start) * step / steps)
         finally:
             beam.set_scanning(False)
