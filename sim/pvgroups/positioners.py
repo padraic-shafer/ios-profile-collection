@@ -26,6 +26,7 @@ Devices with self-contained brace pairs in prefix:  FeedbackLoop, PGM.
 from __future__ import annotations
 
 import asyncio
+import logging
 import numpy as np
 
 from caproto.server import PVGroup, pvproperty
@@ -335,6 +336,9 @@ class PGMEnergyIOC(PVGroup):
         seconds = abs(stop - start) / velocity / max(float(os.environ.get("IOS_SIM_FLY_SPEEDUP", "1")), 1e-6)
         steps = max(int(seconds / 0.1), 1)
         beam.set_fly_range(start, stop)  # where the edge is (sim/pvgroups/beam.py)
+        logging.getLogger("ios.sim").info(
+            "SIM: fly %.1f to %.1f eV, absorption edge at %.1f eV", start, stop, beam.get_beam().edge_energy(start, stop)
+        )
         beam.set_energy(start)
         beam.set_scanning(True)  # the edge applies, the idle events do not
         self._stop_requested = False
