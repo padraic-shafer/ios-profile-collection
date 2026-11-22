@@ -280,17 +280,12 @@ class ScalerIOC(PVGroup):
 
     @CNT.putter
     async def CNT(self, instance, value):
-        """Simulate a count.
+        """Simulate a count: it takes the preset time, then the channels are filled and the put completes.
 
-        Caproto sends the CA put-complete acknowledgement immediately after
-        the putter returns — the async body runs as a background task.
-        EpicsScaler.trigger() fires its 'done' callback on put-complete, so
-        ophyd reads channels immediately after.
-
-        We therefore fill channel values BEFORE yielding (no sleep) so the
-        data is ready when ophyd reads it.  A background asyncio task handles
-        the CNT reset back to 0 after the nominal preset time, which keeps
-        the scaler state consistent for back-to-back counts.
+        As on a real scaler record (and an areaDetector driver), the put to ``.CNT`` completes when the count is
+        done. ophyd's trigger finishes on that put completion and the plan then reads the channels, so a plan's
+        point takes at least the preset time (``.TP``), and a PD Scan, which triggers only the scaler, has one point
+        per preset time instead of the 40 a second that a count that ended at once gave.
         """
         # value=1 means "Count" (enum index 1); 0 = "Done" (reset). caproto hands a putter the
         # label of an enumeration ("Count"), not its index, when the client wrote it as a string.
@@ -301,17 +296,17 @@ class ScalerIOC(PVGroup):
         if int(value) != 1:
             return value
 
+        if getattr(self, "_showing_count", False):
+            return value  # the write below goes through this putter too
         preset = float(self.TP.value)
+        self._showing_count = True
+        try:
+            await self.CNT.write(1)  # "Count" while it counts: the auto count does not start another one
+        finally:
+            self._showing_count = False
+        await asyncio.sleep(max(0.01, preset))
         await self._fill(preset)
-
-        # Reset CNT→0 ("Done") after preset time (background task)
-        async def _reset():
-            await asyncio.sleep(max(0.01, preset))
-            await self.CNT.write(0)  # "Done"
-
-        asyncio.ensure_future(_reset())
-        # Return 1 ("Count") to leave CNT=1 until the background reset fires.
-        return 1
+        return 0  # "Done": the value that the record has when the put completes
 
 
 # ---------------------------------------------------------------------------

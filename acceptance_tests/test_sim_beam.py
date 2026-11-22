@@ -373,6 +373,33 @@ def test_the_xspress3_put_completes_when_the_acquisition_ends_unless_switched_of
         del os.environ["IOS_SIM_XS3_PUT_COMPLETION"]
 
 
+def test_a_count_takes_the_preset_time_and_the_put_completes_when_it_is_done():
+    import time
+
+    from sim.pvgroups.scaler_signals import ScalerIOC
+
+    beam._beam = model()
+    beam.set_scanning(False)
+    ioc = ScalerIOC(prefix="X{{Sclr:1}}")
+
+    async def run():
+        await ioc.TP.write(0.4)
+        before = ioc.S3.value
+        start = time.monotonic()
+        task = asyncio.ensure_future(ioc.CNT.pvspec.put(ioc, ioc.CNT, 1))
+        await asyncio.sleep(0.1)
+        midway = (ioc.S3.value, ScalerIOC._index(ioc.CNT.value, ("Done", "Count")))
+        value = await task
+        return before, midway, time.monotonic() - start, value, ioc.S3.value, ScalerIOC._index(ioc.CNT.value, ("Done", "Count"))
+
+    before, midway, elapsed, value, after, cnt = asyncio.run(run())
+    assert midway == (before, 1)  # still counting at 0.1 s: nothing read yet, CNT says Count
+    assert 0.38 < elapsed < 0.9, elapsed  # the put returned when the count was done
+    assert after != before and after > 30_000  # the channels were filled at the end
+    assert value == 0  # Done: the value that caproto stores when the putter returns (a direct call does not store it)
+    assert cnt == 1  # so the record still says Count here
+
+
 def test_the_scaler_starts_in_autocount_like_the_real_one():
     from sim.pvgroups.scaler_signals import ScalerIOC
 

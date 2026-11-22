@@ -169,6 +169,12 @@ scan, `IOS_SIM_PEAK_GAP_SCAN`, is off by default):
 The edge applies only while the mono flies and ends with the fly, so the Counter afterwards is flat again,
 apart from its events.
 
+A count that a client starts (a put to `.CNT`) takes the preset time (`.TP`): the record says `Count`, the channels are
+filled at the end, and the put completes then, as on a real scaler record. ophyd's trigger finishes on that put
+completion, so a plan's point takes at least `.TP` (1 s by default, the dwell time once Apply sets it): a PD Scan
+has one point per `.TP`, and a Single Scan one per the longer of `.TP` and the Xspress3 acquisition. (The scaler used
+to finish at once, which gave a PD Scan about 40 points a second.)
+
 The scaler starts in AutoCount (`.CONT` = 1), like the real one: every `.TP1` seconds (1 s) it counts by
 itself, except while a count that `.CNT` started is running or the mono is flying.
 
@@ -194,7 +200,7 @@ The type of each PV is guessed from its name and component.
   once (`IOS_SIM_XS3_PUT_COMPLETION=0` switches it off). A client that waits for put completion therefore does not
   depend on seeing the readback go to 1 and back to 0, which a Channel Access monitor does not promise (a busy client
   can miss a 1 that lasts 0.1 s). nslsii's `Xspress3Trigger` does not wait for it; the mock Queueserver's startup file
-  `sim/qs/zz-xs3-trigger.py` (`sim/qs/xs3_trigger.py`) makes its write use put completion and also lets a trigger finish
+  `sim/qs/zz-xs3-trigger.py` (`sim/qs/xs3_trigger.py`) makes its write use put completion (and switches off nslsii's readback-edge callback, which raced with it) and also lets a trigger finish
   on the image counter after a 0.5 s grace (`IOS_SIM_XS3_TRIGGER`: `put+counter`, the default, `put`, `counter` or
   `edge`, nslsii's own, for comparisons). Without it, scans stalled when the client missed the 1.
 - `HDF1:Capture` = 1 makes the file that the plugin names a **symbolic link to one shared simulated file**,
