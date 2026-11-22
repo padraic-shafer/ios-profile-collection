@@ -400,6 +400,31 @@ def test_a_count_takes_the_preset_time_and_the_put_completes_when_it_is_done():
     assert cnt == 1  # so the record still says Count here
 
 
+def test_only_the_auto_count_has_the_timed_events_a_count_that_a_plan_starts_does_not():
+    from sim.pvgroups.scaler_signals import ScalerIOC
+
+    beam._beam = model()
+    beam.set_scanning(False)
+    ioc = ScalerIOC(prefix="X{{Sclr:1}}")
+    saved = beam.tey_gain, beam.pd_gain
+    beam.tey_gain, beam.pd_gain = (lambda: 5.0), (lambda: 0.2)  # an event at its height, as at the start of a ramp
+    try:
+
+        async def ratios(events):
+            rows = []
+            for _ in range(20):
+                await ioc._fill(0.5, events=events)
+                rows.append((ioc.S2.value / ioc.S3.value, ioc.S4.value / ioc.S3.value))
+            return np.median(np.array(rows, dtype=float), axis=0)
+
+        pd_event, tey_event = asyncio.run(ratios(True))
+        pd_flat, tey_flat = asyncio.run(ratios(False))
+    finally:
+        beam.tey_gain, beam.pd_gain = saved
+    assert tey_event > 2.5 and pd_event < 0.3  # the auto count shows the event
+    assert abs(pd_flat - 0.75) < 0.05 and abs(tey_flat - 0.6) < 0.05  # a plan's count does not
+
+
 def test_the_scaler_starts_in_autocount_like_the_real_one():
     from sim.pvgroups.scaler_signals import ScalerIOC
 

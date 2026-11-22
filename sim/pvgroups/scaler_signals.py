@@ -64,8 +64,8 @@ class ScalerIOC(PVGroup):
     (simulated via asyncio.sleep) then fills channel values and resets ``.CNT`` to 0.
 
     Channel 2 (PD), channel 3 (I0) and channel 4 (TEY) follow the beam model (sim/pvgroups/beam.py):
-    Poisson counts of a rate that changes slowly with time. When idle, TEY has now and then a peak and
-    PD a dip at the same time; while the mono flies, both follow the absorption edge. The other channels
+    Poisson counts of a rate that changes slowly with time. In the auto count (the Counter), TEY has now and
+    then a peak and PD a dip at the same time; while the mono flies, both follow the absorption edge. The other channels
     are random integers.
 
     Like the real record, it starts in AutoCount (``.CONT`` = 1): every ``.TP1`` seconds it counts
@@ -225,8 +225,13 @@ class ScalerIOC(PVGroup):
     # calc5 sub-record used by norm_ch4
     calc5_VAL = pvproperty(name="_calc5.VAL", value=0.0, dtype=float, read_only=True)
 
-    async def _fill(self, seconds: float) -> None:
-        """Write the channels of one count of ``seconds``."""
+    async def _fill(self, seconds: float, events: bool = True) -> None:
+        """Write the channels of one count of ``seconds``.
+
+        ``events`` lets the beam model's time-based TEY peaks and PD dips (sim/pvgroups/beam.py) into the count:
+        they are for the Counter, which is the scaler's own auto count. A count that a plan starts (a point of a
+        scan) has none: the first point of a ramp is taken before the mono flies and would otherwise catch one.
+        """
         rng = np.random.default_rng()
         channel_pvs = [
             self.S1,  self.S2,  self.S3,  self.S4,  self.S5,  self.S6,
@@ -244,11 +249,11 @@ class ScalerIOC(PVGroup):
             if i == 0:
                 await ch.write(int(seconds * self.FREQ.value))
             elif i == 1:
-                await ch.write(int(rng.poisson(PD_RATE * seconds * intensity * beam.pd_gain() * edge.pd * pd_noise)))
+                await ch.write(int(rng.poisson(PD_RATE * seconds * intensity * (beam.pd_gain() if events else 1.0) * edge.pd * pd_noise)))
             elif i == 2:
                 await ch.write(int(rng.poisson(I0_RATE * seconds * intensity)))
             elif i == 3:
-                await ch.write(int(rng.poisson(TEY_RATE * seconds * intensity * beam.tey_gain() * edge.tey * tey_noise)))
+                await ch.write(int(rng.poisson(TEY_RATE * seconds * intensity * (beam.tey_gain() if events else 1.0) * edge.tey * tey_noise)))
             else:
                 await ch.write(int(rng.integers(1000, 100_000)))
         await self.T.write(seconds)
@@ -305,7 +310,7 @@ class ScalerIOC(PVGroup):
         finally:
             self._showing_count = False
         await asyncio.sleep(max(0.01, preset))
-        await self._fill(preset)
+        await self._fill(preset, events=False)  # a count that a plan starts: no events, see _fill
         return 0  # "Done": the value that the record has when the put completes
 
 

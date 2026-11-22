@@ -146,7 +146,9 @@ scaler channels are random, as before.
 TEY has now and then a peak, a Gaussian in time whose top is 2 to 7 times the background, so that TEY/I0 runs
 from the flat level to 2 to 7 times it. At the same moment PD dips, 10 to 80 % below its background (the
 deeper the dip, the higher the peak): a stronger absorption raises the drain current and lowers the
-transmission. Events never overlap and come at random with a mean gap of 30 s and a width (FWHM) of 6 s, so
+transmission. The events are for the Counter, that is the scaler's own auto count: a count that a plan starts (a point of
+a PD Scan or a Single Scan, including the first one, which is taken before the mono flies) has none. Events never overlap
+and come at random with a mean gap of 30 s and a width (FWHM) of 6 s, so
 that they are visible within a minute of watching. They run while the mono is **not** flying (the Counter, or
 nothing running). While the mono flies, a scan has an **absorption edge** instead (the event schedule for a
 scan, `IOS_SIM_PEAK_GAP_SCAN`, is off by default):
