@@ -22,8 +22,36 @@ log = logging.getLogger("ios.sim")
 GRACE_S = 0.5
 
 
+def _keep_the_status(detector) -> None:
+    """Make ``detector.trigger`` return its status even when the acquisition has ended before it returns.
+
+    nslsii's ``trigger`` returns ``self._acquire_status``, which the end of the acquisition sets to None. A
+    short acquisition on a busy worker (the Tiled writer's thread, a long table print) can end between the
+    write and the return, and the RunEngine then gets None and fails the plan ('NoneType' has no attribute
+    'done'). The status is remembered when it is made and returned in that case; it is already finished.
+    """
+    make = getattr(detector, "new_acquire_status", None)
+    if make is None or getattr(detector, "_xs3_keeps_status", False):
+        return
+    detector._xs3_keeps_status = True
+    original = detector.trigger
+
+    def new_acquire_status(*args, **kwargs):
+        status = make(*args, **kwargs)
+        detector._xs3_last_status = status
+        return status
+
+    def trigger():
+        status = original()
+        return status if status is not None else getattr(detector, "_xs3_last_status", None)
+
+    detector.new_acquire_status = new_acquire_status
+    detector.trigger = trigger
+
+
 def install(detector, grace: float = GRACE_S) -> None:
     """Wrap ``detector.trigger`` so that its status also finishes on the image counter."""
+    _keep_the_status(detector)
     original = detector.trigger
     counter = detector.cam.array_counter
 
@@ -71,6 +99,7 @@ def install_put_completion(detector) -> None:
     ``use_complete=True`` and finishes the trigger's status from the callback. The readback edge may finish
     it first (the usual order); then nothing happens.
     """
+    _keep_the_status(detector)
     acquire = detector.cam.acquire
     original_put = acquire.put
 

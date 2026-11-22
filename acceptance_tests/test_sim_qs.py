@@ -230,6 +230,42 @@ def test_the_trigger_writes_with_put_completion_and_finishes_from_it():
     calls[-1][1]["callback"]()  # must not raise
 
 
+def test_a_trigger_that_ended_before_it_returns_still_returns_its_status():
+    from types import SimpleNamespace
+
+    from ophyd.status import Status
+
+    from sim.qs.xs3_trigger import install_put_completion
+
+    calls = []
+
+    class FakeAcquire:
+        def put(self, value, **kwargs):
+            calls.append(kwargs)
+            if "callback" in kwargs:
+                kwargs["callback"]()  # the acquisition is over before the write returns
+
+    detector = SimpleNamespace(cam=SimpleNamespace(acquire=FakeAcquire()), _acquire_status=None)
+
+    def new_acquire_status():
+        return Status()
+
+    detector.new_acquire_status = new_acquire_status
+
+    def trigger():  # nslsii's, in short
+        detector._acquire_status = detector.new_acquire_status()
+        detector.cam.acquire.put(1, wait=False)
+        return detector._acquire_status
+
+    detector.trigger = trigger
+    install_put_completion(detector)
+    status = detector.trigger()
+    assert status is not None and status.done and status.success
+    assert detector._acquire_status is None
+    install_put_completion(detector)  # a second install does not wrap again
+    assert detector.trigger() is not None
+
+
 if __name__ == "__main__":
     failed = 0
     for name, func in sorted(globals().items()):
